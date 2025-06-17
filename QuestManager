@@ -1,0 +1,435 @@
+// MAIN ECHOES OF THE SEA SCRIPT
+// MANAGES THE QUESTS AND MAIN DIALOGUES - USES OTHER SCRIPTS TO CONCLUDE STEPS
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+
+public class QuestManager : MonoBehaviour
+{
+    public static QuestManager Instance { get; private set; }
+
+    [System.Serializable]
+    public class QuestStep
+    {
+        public string stepDescription;
+        public string[] dialogueLines;
+        public bool isCompleted;
+        public GameObject[] objectsToActivate;
+        public GameObject[] objectsToDeactivate;
+    }
+
+    [System.Serializable]
+    public class QuestPart
+    {
+        public string partName;
+        public List<QuestStep> steps = new List<QuestStep>();
+        public bool isActive;
+        public bool isCompleted;
+    }
+
+    [System.Serializable]
+    public class SpeakerPortrait
+    {
+        public string speakerName;
+        public Sprite portraitSprite;
+    }
+
+    public List<QuestPart> questParts = new List<QuestPart>();
+    public List<GameObject> initialNpcs = new List<GameObject>();
+    public int currentPartIndex = 0;
+    public int currentStepIndex = 0;
+    public int pistasColetadas = 0;
+
+    public Text questDescriptionText;
+    public GameObject dialoguePanel;
+    public Text dialogueText;
+    public Text speakerNameText;
+    public float typingSpeed = 0.02f;
+    private Coroutine typingCoroutine;
+    private bool isDialoguePlaying = false;
+    private int currentDialogueLine = 0;
+    public bool isDialogueActive = false;
+
+    public Image speakerImage;
+    public List<SpeakerPortrait> speakerPortraits = new List<SpeakerPortrait>();
+
+    
+    public Button skipButton;
+
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
+
+    private void Start()
+    {
+        foreach (GameObject npc in initialNpcs)
+        {
+            if (npc != null) npc.SetActive(false);
+        }
+
+        if (questParts.Count > 0)
+        {
+            questParts[0].isActive = true;
+            questParts[0].steps[0].isCompleted = false;
+
+            foreach (GameObject obj in questParts[0].steps[0].objectsToActivate)
+            {
+                if (obj != null) obj.SetActive(true);
+            }
+
+            UpdateQuestUI();
+        }
+
+        
+        if (skipButton != null)
+        {
+            skipButton.onClick.AddListener(SkipDialogue);
+        }
+    }
+
+    public void TeleportPlayer(Transform destination)
+    {
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        if (player != null && destination != null)
+        {
+            CharacterController cc = player.GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = false;
+
+            player.transform.position = destination.position;
+            player.transform.rotation = destination.rotation;
+
+            if (cc != null) cc.enabled = true;
+
+            Debug.Log($"Teleportado para: {destination.name}");
+        }
+    }
+
+    public void CompleteCurrentStep()
+    {
+        Debug.Log($"Completando passo {currentStepIndex} da parte {currentPartIndex}");
+
+        if (questParts[currentPartIndex].steps[currentStepIndex].isCompleted) return;
+
+        QuestPart currentPart = questParts[currentPartIndex];
+        QuestStep currentStep = currentPart.steps[currentStepIndex];
+
+        currentStep.isCompleted = true;
+        Debug.Log($"Completou: {currentPart.partName} - {currentStep.stepDescription}");
+
+        foreach (GameObject obj in currentStep.objectsToDeactivate)
+        {
+            if (obj != null) obj.SetActive(false);
+        }
+
+        bool allStepsCompleted = currentPart.steps.TrueForAll(step => step.isCompleted);
+
+        if (allStepsCompleted)
+        {
+            currentPart.isCompleted = true;
+
+            if (currentPartIndex < questParts.Count - 1)
+            {
+                int nextPart = currentPartIndex + 1;
+                questParts[nextPart].isActive = true;
+                questParts[nextPart].steps[0].isCompleted = false;
+
+                questParts[currentPartIndex].isActive = false;
+
+                currentPartIndex = nextPart;
+                currentStepIndex = 0;
+
+                Debug.Log($"Missão avançou para: {questParts[currentPartIndex].partName}");
+
+                foreach (GameObject obj in questParts[currentPartIndex].steps[0].objectsToActivate)
+                {
+                    if (obj != null) obj.SetActive(true);
+                }
+            }
+        }
+        else
+        {
+            currentStepIndex++;
+        }
+
+        UpdateQuestUI();
+    }
+
+    public void CompleteCurrentStep(bool skipDialogue = false)
+    {
+        if (questParts[currentPartIndex].steps[currentStepIndex].isCompleted) return;
+
+        questParts[currentPartIndex].steps[currentStepIndex].isCompleted = true;
+
+        UpdateQuestUI(skipDialogue);
+    }
+
+    public void UpdateQuestUI()
+    {
+        UpdateQuestUI(false);
+    }
+
+    public void UpdateQuestUI(bool skipDialogue = false)
+    {
+        if (!questParts[currentPartIndex].isActive) return;
+
+        if (isDialoguePlaying)
+        {
+            StopCoroutine(typingCoroutine);
+            dialoguePanel.SetActive(false);
+            isDialoguePlaying = false;
+        }
+
+        questDescriptionText.text = questParts[currentPartIndex].steps[currentStepIndex].stepDescription;
+
+        if (!skipDialogue &&
+            questParts[currentPartIndex].steps[currentStepIndex].dialogueLines.Length > 0 &&
+            !questParts[currentPartIndex].steps[currentStepIndex].isCompleted)
+        {
+            StartDialogue(questParts[currentPartIndex].steps[currentStepIndex].dialogueLines);
+        }
+    }
+
+    public void StartDialogue(string[] lines)
+    {
+        if (isDialoguePlaying) return;
+
+        Time.timeScale = 0;
+        isDialogueActive = true;
+        Cursor.lockState = CursorLockMode.None;
+
+        dialoguePanel.SetActive(true);
+        currentDialogueLine = 0;
+        isDialoguePlaying = true;
+
+        if (typingCoroutine != null)
+        {
+            StopCoroutine(typingCoroutine);
+        }
+
+        GameObject.FindGameObjectWithTag("Player").GetComponentInChildren<Animator>().enabled = false;
+
+        typingCoroutine = StartCoroutine(TypeDialogue(lines));
+    }
+
+    private IEnumerator TypeDialogue(string[] lines)
+    {
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string line = lines[i];
+            string speaker = "";
+            string dialogue = line;
+            Sprite portrait = null;
+
+            if (line.Contains(":"))
+            {
+                int separatorIndex = line.IndexOf(':');
+                speaker = line.Substring(0, separatorIndex);
+                dialogue = line.Substring(separatorIndex + 1).Trim();
+
+                foreach (SpeakerPortrait sp in speakerPortraits)
+                {
+                    if (sp.speakerName == speaker)
+                    {
+                        portrait = sp.portraitSprite;
+                        break;
+                    }
+                }
+            }
+
+            speakerNameText.text = speaker;
+            speakerImage.sprite = portrait;
+            speakerImage.gameObject.SetActive(portrait != null);
+
+            dialogueText.text = "";
+
+            foreach (char letter in dialogue.ToCharArray())
+            {
+                dialogueText.text += letter;
+                yield return new WaitForSecondsRealtime(typingSpeed);
+            }
+
+            bool waitingForInput = true;
+            while (waitingForInput)
+            {
+                if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0))
+                {
+                    waitingForInput = false;
+                }
+                yield return null;
+            }
+        }
+
+        speakerImage.gameObject.SetActive(false);
+        dialoguePanel.SetActive(false);
+        isDialoguePlaying = false;
+        isDialogueActive = false;
+        Time.timeScale = 1;
+        Cursor.lockState = CursorLockMode.Locked;
+
+        GameObject.FindGameObjectWithTag("Player").GetComponentInChildren<Animator>().enabled = true;
+    }
+
+    
+    private void SkipDialogue()
+    {
+        if (isDialoguePlaying)
+        {
+            StopCoroutine(typingCoroutine);
+
+            dialoguePanel.SetActive(false);
+            isDialoguePlaying = false;
+            isDialogueActive = false;
+            Time.timeScale = 1;
+            Cursor.lockState = CursorLockMode.Locked;
+
+            GameObject.FindGameObjectWithTag("Player").GetComponentInChildren<Animator>().enabled = true;
+        }
+    }
+
+    public bool IsCurrentQuestStepCompleted()
+    {
+        return questParts[currentPartIndex].steps[currentStepIndex].isCompleted;
+    }
+
+    public void AdvanceDialogue()
+    {
+        if (isDialoguePlaying && Input.GetKeyDown(KeyCode.Space))
+        {
+            
+        }
+    }
+
+    public void CompleteStep(int partIndex, int stepIndex)
+    {
+        if (partIndex == currentPartIndex && stepIndex == currentStepIndex)
+        {
+            questParts[partIndex].steps[stepIndex].isCompleted = true;
+            UpdateQuestUI();
+            CompleteCurrentStep();
+        }
+    }
+
+    public void ForceCompleteStep(int partIndex, int stepIndex)
+    {
+        if (partIndex < 0 || partIndex >= questParts.Count ||
+            stepIndex < 0 || stepIndex >= questParts[partIndex].steps.Count)
+        {
+            Debug.LogError("Índices de missão inválidos!");
+            return;
+        }
+
+        currentPartIndex = partIndex;
+        currentStepIndex = stepIndex;
+
+        questParts[partIndex].steps[stepIndex].isCompleted = true;
+        CompleteCurrentStep(true);
+    }
+
+    public void CompleteSpecificStep(int partIndex, int stepIndex)
+    {
+        if (partIndex < 0 || partIndex >= questParts.Count ||
+            stepIndex < 0 || stepIndex >= questParts[partIndex].steps.Count)
+        {
+            Debug.LogError("Índices inválidos!");
+            return;
+        }
+
+        currentPartIndex = partIndex;
+        currentStepIndex = stepIndex;
+
+        questParts[partIndex].steps[stepIndex].isCompleted = true;
+
+        CompleteCurrentStep();
+    }
+
+    public void ForceCompleteCurrentStep()
+    {
+        Debug.Log($"Forçando conclusão do passo atual - Parte {currentPartIndex}, Step {currentStepIndex}");
+
+        if (currentPartIndex == 3 && currentStepIndex == 0)
+        {
+            questParts[currentPartIndex].steps[currentStepIndex].isCompleted = true;
+            CompleteCurrentStep();
+        }
+        else
+        {
+            Debug.LogError($"Não está no passo esperado (Parte 4 Step 0). Atual: Parte {currentPartIndex} Step {currentStepIndex}");
+        }
+    }
+
+    public void UpdateQuestDescriptionOnly(int partIndex, int stepIndex, string newDescription)
+    {
+        if (partIndex < 0 || partIndex >= questParts.Count || 
+            stepIndex < 0 || stepIndex >= questParts[partIndex].steps.Count)
+        {
+            Debug.LogError("Índices inválidos para atualização de descrição");
+            return;
+        }
+
+        questParts[partIndex].steps[stepIndex].stepDescription = newDescription;
+        questDescriptionText.text = newDescription;
+    }
+
+    public void CompleteSpecificStepWithProgress(int partIndex, int stepIndex)
+    {
+        Debug.Log($"Completando passo com progressão: Parte {partIndex}, Step {stepIndex}");
+
+        if (partIndex < 0 || partIndex >= questParts.Count || 
+            stepIndex < 0 || stepIndex >= questParts[partIndex].steps.Count)
+        {
+            Debug.LogError("Índices inválidos!");
+            return;
+        }
+
+        questParts[partIndex].steps[stepIndex].isCompleted = true;
+
+        bool allStepsCompleted = questParts[partIndex].steps.TrueForAll(s => s.isCompleted);
+        
+        if (allStepsCompleted)
+        {
+            Debug.Log($"Todos steps da parte {partIndex} completos - avançando para próxima parte");
+            
+            questParts[partIndex].isCompleted = true;
+
+            if (partIndex < questParts.Count - 1)
+            {
+                int nextPart = partIndex + 1;
+                questParts[nextPart].isActive = true;
+                questParts[nextPart].steps[0].isCompleted = false;
+
+                currentPartIndex = nextPart;
+                currentStepIndex = 0;
+
+                Debug.Log($"Missão avançou para: {questParts[nextPart].partName}");
+
+                foreach (GameObject obj in questParts[nextPart].steps[0].objectsToActivate)
+                {
+                    if (obj != null) obj.SetActive(true);
+                }
+            }
+        }
+        else
+        {
+            currentStepIndex++;
+            Debug.Log($"Avançando para step {currentStepIndex} na mesma parte");
+
+            foreach (GameObject obj in questParts[partIndex].steps[currentStepIndex].objectsToActivate)
+            {
+                if (obj != null) obj.SetActive(true);
+            }
+        }
+
+        UpdateQuestUI(true);
+    }
+}
