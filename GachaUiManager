@@ -1,0 +1,297 @@
+// For gacha
+
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using UnityEngine.Video;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+
+public class GachaUIManager : MonoBehaviour
+{
+    [Header("Banner Elements")]
+    public Image bannerImage;
+    public TextMeshProUGUI timeRemainingText;
+    public TextMeshProUGUI currencyText;
+    public TextMeshProUGUI pityCounterText;
+    
+    [Header("Pull Buttons")]
+    public Button pull1Button;
+    public Button pull5Button;
+    public Button pull10Button;
+
+    [Header("Character Selection")]
+    public GameObject characterSelectionPanel;
+    public Button selectNicoButton;
+    public Button selectEmyrisButton;
+    
+    [Header("Result Display")]
+    public CanvasGroup resultPanel;
+    public VideoPlayer resultVideoPlayer;
+    public RawImage resultVideoDisplay;
+    public TextMeshProUGUI resultCharacterName;
+    public TextMeshProUGUI resultCharacterTier;
+    public Image resultCharacterImage;
+    
+    [Header("Item Display")]
+    public Sprite defaultItemSprite;
+    
+    [Header("UI Groups")]
+    public CanvasGroup mainCanvasGroup;
+    public CanvasGroup resultGroup;
+    
+    [Header("Videos")]
+    public VideoClip commonVideo;
+    public VideoClip rareVideo;
+    public VideoClip legendaryVideo;
+    
+    private GachaSystemNEW gachaSystem;
+    private DateTime bannerEndTime;
+    private int playerCurrency = 32000;
+    private const int currencyPerPull = 120;
+    private bool pullInProgress = false;
+
+    private void Start()
+    {
+        gachaSystem = FindObjectOfType<GachaSystemNEW>();
+        if (gachaSystem == null)
+        {
+            Debug.LogError("GachaSystem não encontrado!");
+            return;
+        }
+        
+        SetupButtons();
+        UpdateUI();
+        bannerEndTime = DateTime.Now.AddDays(7);
+        
+        if (bannerImage != null)
+        {
+            bannerImage.preserveAspect = true;
+        }
+
+        
+        mainCanvasGroup.alpha = 1;
+        mainCanvasGroup.blocksRaycasts = true;
+        mainCanvasGroup.interactable = true;
+
+        resultGroup.alpha = 0;
+        resultGroup.blocksRaycasts = false;
+        resultGroup.interactable = false;
+        resultGroup.gameObject.SetActive(false);
+
+        
+        resultPanel.gameObject.SetActive(false);
+        resultVideoDisplay.gameObject.SetActive(false);
+        resultCharacterImage.gameObject.SetActive(false);
+        resultCharacterName.gameObject.SetActive(false);
+        resultCharacterTier.gameObject.SetActive(false);
+
+       
+        resultVideoPlayer.source = VideoSource.VideoClip;
+        resultVideoPlayer.renderMode = VideoRenderMode.RenderTexture;
+        resultVideoPlayer.audioOutputMode = VideoAudioOutputMode.None;
+        resultVideoPlayer.playOnAwake = false;
+    }
+
+    private void Update()
+    {
+        UpdateBannerTimer();
+    }
+
+    private IEnumerator PerformPull(int pullCount)
+    {
+        if(pullInProgress) yield break;
+        
+        pullInProgress = true;
+        
+        if(playerCurrency < pullCount * currencyPerPull)
+        {
+            Debug.Log("Moedas insuficientes");
+            pullInProgress = false;
+            yield break;
+        }
+        
+        playerCurrency -= pullCount * currencyPerPull;
+        UpdateUI();
+
+        List<object> pullResults = new List<object>();
+        
+        
+        for(int i = 0; i < pullCount; i++)
+        {
+            object result = gachaSystem.PullGacha();
+            if(result != null) pullResults.Add(result);
+            UpdateUI();
+            yield return null;
+        }
+
+        
+        object bestResult = GetMostValuableResult(pullResults);
+        
+        if(bestResult != null)
+        {
+            yield return StartCoroutine(ShowAnimatedResult(bestResult));
+        }
+
+        pullInProgress = false;
+        UpdateUI();
+    }
+
+    private object GetMostValuableResult(List<object> results)
+    {
+        object bestResult = null;
+        int highestPriority = -1;
+
+        foreach(var result in results)
+        {
+            int currentPriority = 0;
+            
+            if(result is Character character)
+            {
+                currentPriority = character.tier == "S" ? 2 : 
+                                 character.tier == "A" ? 1 : 0;
+            }
+            else if(result is Item)
+            {
+                currentPriority = 0;
+            }
+
+            if(currentPriority > highestPriority)
+            {
+                highestPriority = currentPriority;
+                bestResult = result;
+            }
+        }
+
+        return bestResult;
+    }
+
+    private IEnumerator ShowAnimatedResult(object result)
+    {
+       
+        VideoClip clipToPlay = commonVideo;
+        string tier = "Item";
+        Sprite resultSprite = defaultItemSprite;
+        string itemName = "Item Desconhecido";
+
+        if(result is Character character)
+        {
+            resultSprite = character.characterSprite;
+            itemName = character.characterName;
+            tier = $"Tier {character.tier}";
+            clipToPlay = character.tier == "S" ? legendaryVideo : 
+                        character.tier == "A" ? rareVideo : commonVideo;
+        }
+        else if(result is Item item)
+        {
+            resultSprite = item.itemSprite ?? defaultItemSprite;
+            itemName = item.itemName;
+            tier = "Item";
+        }
+
+        
+        RenderTexture rt = new RenderTexture(1920, 1080, 24);
+        resultVideoPlayer.targetTexture = rt;
+        resultVideoDisplay.texture = rt;
+        resultVideoPlayer.clip = clipToPlay;
+        
+        
+        resultVideoDisplay.gameObject.SetActive(true);
+        mainCanvasGroup.alpha = 0;
+        mainCanvasGroup.interactable = false;
+        mainCanvasGroup.blocksRaycasts = false;
+        
+        
+        resultVideoPlayer.Prepare();
+        while(!resultVideoPlayer.isPrepared)
+            yield return null;
+        
+        resultVideoPlayer.Play();
+        
+       
+        while(resultVideoPlayer.isPlaying)
+            yield return null;
+        
+       
+        resultPanel.gameObject.SetActive(true);
+        resultGroup.alpha = 1;
+        resultGroup.blocksRaycasts = true;
+        resultGroup.interactable = true;
+        
+        resultCharacterImage.sprite = resultSprite;
+        resultCharacterName.text = itemName;
+        resultCharacterTier.text = tier;
+        
+        resultCharacterImage.gameObject.SetActive(true);
+        resultCharacterName.gameObject.SetActive(true);
+        resultCharacterTier.gameObject.SetActive(true);
+        
+        
+        while(!Input.GetMouseButtonDown(0))
+            yield return null;
+        
+        
+        resultVideoPlayer.Stop();
+        resultVideoDisplay.gameObject.SetActive(false);
+        DestroyImmediate(rt);
+        
+        resultGroup.alpha = 0;
+        resultGroup.blocksRaycasts = false;
+        resultGroup.interactable = false;
+        resultGroup.gameObject.SetActive(false);
+        mainCanvasGroup.alpha = 1;
+        mainCanvasGroup.interactable = true;
+        mainCanvasGroup.blocksRaycasts = true;
+    }
+
+    private void SetupButtons()
+    {
+        pull1Button.onClick.AddListener(() => StartCoroutine(PerformPull(1)));
+        pull5Button.onClick.AddListener(() => StartCoroutine(PerformPull(5)));
+        pull10Button.onClick.AddListener(() => StartCoroutine(PerformPull(10)));
+        
+        selectNicoButton.onClick.AddListener(() => {
+            if(gachaSystem.tierSCharacters.Count > 0)
+            {
+                gachaSystem.SelectTierSCharacter(gachaSystem.tierSCharacters[0]);
+                characterSelectionPanel.SetActive(false);
+            }
+        });
+        
+        selectEmyrisButton.onClick.AddListener(() => {
+            if(gachaSystem.tierSCharacters.Count > 1)
+            {
+                gachaSystem.SelectTierSCharacter(gachaSystem.tierSCharacters[1]);
+                characterSelectionPanel.SetActive(false);
+            }
+        });
+    }
+
+    private void UpdateUI()
+    {
+        currencyText.text = playerCurrency.ToString();
+        pityCounterText.text = $"Pity: {gachaSystem.GetPityCounter()}/80";
+    }
+
+    private void UpdateBannerTimer()
+    {
+        TimeSpan remainingTime = bannerEndTime - DateTime.Now;
+        timeRemainingText.text = $"{remainingTime.Days}d {remainingTime.Hours}h {remainingTime.Minutes}m";
+    }
+
+    public void AddCurrency(int amount)
+    {
+        playerCurrency += amount;
+        UpdateUI();
+    }
+
+    void OnDestroy()
+    {
+        if (resultVideoPlayer.targetTexture != null)
+        {
+            DestroyImmediate(resultVideoPlayer.targetTexture);
+            resultVideoPlayer.targetTexture = null;
+        }
+    }
+}
