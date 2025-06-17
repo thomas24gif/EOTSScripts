@@ -1,0 +1,129 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+public class CharacterCollection : MonoBehaviour
+{
+    public List<Character> activeTeam = new List<Character>(); 
+    public Dictionary<Character, int> inventory = new Dictionary<Character, int>(); 
+    public Dictionary<Character, GameObject> characterInstances = new Dictionary<Character, GameObject>(); 
+
+    public Character mainCharacter;
+
+    void Awake()
+    {
+        
+        if (FindObjectsOfType<CharacterCollection>().Length > 1)
+        {
+            Destroy(gameObject);
+            return;
+        }
+
+        
+        if (characterInstances == null)
+        {
+            characterInstances = new Dictionary<Character, GameObject>();
+        }
+    }
+
+    void Start()
+    {
+        
+        if (!activeTeam.Contains(mainCharacter))
+        {
+            AddMainCharacterToTeam();
+        }
+    }
+
+    void AddMainCharacterToTeam()
+    {
+        
+        if (!activeTeam.Contains(mainCharacter))
+        {
+            activeTeam.Insert(0, mainCharacter);
+            Debug.Log($"[MAIN CHAR] Adicionado ao time: {mainCharacter.characterName}");
+        }
+    }
+
+    public void AddCharacter(Character character)
+    {
+        if (character == mainCharacter)
+        {
+            AddMainCharacterToTeam();
+            return;
+        }
+
+        if (activeTeam.Count < 3)
+        {
+            if (!activeTeam.Contains(character))
+            {
+                activeTeam.Add(character);
+                Debug.Log($"[TIME] {character.characterName} adicionado ao time ativo");
+            }
+        }
+        else
+        {
+            AddToInventory(character);
+        }
+    }
+
+    private void AddToInventory(Character character)
+    {
+        if (inventory.ContainsKey(character))
+        {
+            inventory[character]++;
+        }
+        else
+        {
+            inventory.Add(character, 1);
+        }
+        Debug.Log($"[INVENTÁRIO] {character.characterName} adicionado. Total: {inventory[character]}");
+    }
+
+    public void MoveToTeam(Character character)
+    {
+        if (character == mainCharacter) return; 
+        
+        if (activeTeam.Count >= 3)
+        {
+            Debug.Log("Active team is full.");
+            return;
+        }
+
+        if (inventory.ContainsKey(character))
+        {
+           
+            activeTeam.Add(character);
+            inventory[character]--;
+            
+            if (inventory[character] == 0)
+            {
+                inventory.Remove(character);
+            }
+            
+            Debug.Log($"[TIME] {character.characterName} movido para o time ativo");
+        }
+    }
+
+    public void MoveToInventory(Character character)
+    {
+        if (character == mainCharacter) return; 
+        
+        if (activeTeam.Contains(character))
+        {
+            activeTeam.Remove(character);
+            AddCharacter(character); 
+            Debug.Log($"[INVENTÁRIO] {character.characterName} movido para o inventário");
+        }
+    }
+
+    private void EnsureCharacterInstance(Character character)
+    {
+        if (!characterInstances.ContainsKey(character))
+        {
+            GameObject instance = Instantiate(character.prefab);
+            instance.SetActive(false);
+            characterInstances.Add(character, instance);
+            Debug.Log($"[INSTÂNCIA] Criada nova instância para {character.characterName}");
+        }
+    }
+}
