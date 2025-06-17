@@ -1,0 +1,259 @@
+// Soft pity is 60 and Hard pity 80
+// Has 50/50 and guarantee system
+// depends on other gacha-related codes to work - theyre available on my profile
+
+using System.Collections.Generic;
+using UnityEngine;
+
+public class GachaSystemNEW : MonoBehaviour
+{
+    public List<Character> characters = new List<Character>();
+    public List<Item> items = new List<Item>();
+    public List<Character> tierSCharacters = new List<Character>();
+
+    public int pityCounter = 0;
+    public int softPity = 60;
+    public int hardPity = 80;
+    public int tierAPityThreshold = 20;
+
+    private Character selectedTierSCharacter;
+    private bool isGuaranteed = false;
+    private int tierACounter = 0;
+
+    public CharacterCollection characterCollection;
+
+    public object PullGacha()
+    {
+        pityCounter++;
+        Debug.Log($"Pity atualizado para: {pityCounter}");
+
+        
+        if (tierACounter >= tierAPityThreshold)
+        {
+            tierACounter = 0;
+            Character tierACharacter = GetRandomTierACharacter();
+            if (tierACharacter != null)
+            {
+                AddCharacterToCollection(tierACharacter);
+                return tierACharacter;
+            }
+        }
+
+        if (pityCounter >= hardPity)
+        {
+            ResetPullingState(); 
+            Character tierSCharacter = GetTierSCharacterWithGuarantee();
+            if (tierSCharacter != null)
+            {
+                AddCharacterToCollection(tierSCharacter);
+                return tierSCharacter;
+            }
+        }
+
+        
+        float currentRate = GetCurrentTierSRate();
+        float roll = Random.value;
+
+        if (roll < currentRate)
+        {
+            pityCounter = 0;
+            Character tierSCharacter = GetTierSCharacterWithGuarantee();
+            if (tierSCharacter != null)
+            {
+                AddCharacterToCollection(tierSCharacter);
+                return tierSCharacter;
+            }
+        }
+        else if (roll < 0.5f)
+        {
+            Character tierACharacter = GetRandomTierACharacter();
+            if (tierACharacter != null)
+            {
+                AddCharacterToCollection(tierACharacter);
+                return tierACharacter;
+            }
+        }
+        else
+        {
+            Item item = GetRandomItem();
+            if (item != null) return item;
+        }
+
+        return null;
+    }
+
+    
+    public void ResetPullingState()
+    {
+        
+        if(pityCounter >= hardPity)
+        {
+            pityCounter = 0;
+            isGuaranteed = false;
+        }
+    }
+
+    
+    public Character GetSelectedCharacter()
+    {
+        return selectedTierSCharacter;
+    }
+
+    public int GetPityCounter()
+    {
+        return pityCounter;
+    }
+
+    public bool IsGuaranteed()
+    {
+        return isGuaranteed;
+    }
+
+    private float GetCurrentTierSRate()
+    {
+        if (pityCounter < softPity)
+        {
+            return 0.01f;
+        }
+        else
+        {
+            float increasedRate = 0.01f + (pityCounter - softPity) * 0.02f;
+            return Mathf.Min(increasedRate, 1.0f);
+        }
+    }
+
+    private Character GetTierSCharacterWithGuarantee()
+    {
+        if (isGuaranteed)
+        {
+            isGuaranteed = false;
+            selectedTierSCharacter.isUnlocked = true;
+            return selectedTierSCharacter;
+        }
+        else
+        {
+            Character randomTierSCharacter = GetRandomTierSCharacter();
+            if (randomTierSCharacter == selectedTierSCharacter)
+            {
+                isGuaranteed = false;
+            }
+            else
+            {
+                isGuaranteed = true;
+            }
+            randomTierSCharacter.isUnlocked = true;
+            return randomTierSCharacter;
+        }
+    }
+
+    private Character GetRandomTierSCharacter()
+    {
+        if (tierSCharacters == null || tierSCharacters.Count == 0)
+        {
+            Debug.LogError("Lista de personagens Tier S está vazia ou não atribuída.");
+            return null;
+        }
+
+        int randomIndex = Random.Range(0, tierSCharacters.Count);
+        return tierSCharacters[randomIndex];
+    }
+
+    private Character GetRandomTierACharacter()
+    {
+        List<Character> tierACharacters = characters.FindAll(c => c.tier == "A");
+        if (tierACharacters == null || tierACharacters.Count == 0)
+        {
+            Debug.LogError("Lista de personagens Tier A está vazia ou não atribuída.");
+            return null;
+        }
+
+        int randomIndex = Random.Range(0, tierACharacters.Count);
+        return tierACharacters[randomIndex];
+    }
+
+    private Item GetRandomItem()
+    {
+        if (items == null || items.Count == 0)
+        {
+            Debug.LogError("Lista de itens está vazia ou não atribuída.");
+            return null;
+        }
+
+        int randomIndex = Random.Range(0, items.Count);
+        return items[randomIndex];
+    }
+
+    public void SelectTierSCharacter(Character selectedCharacter)
+    {
+        if (selectedCharacter == null)
+        {
+            Debug.LogError("Personagem não pode ser nulo.");
+            return;
+        }
+
+        selectedTierSCharacter = selectedCharacter;
+        Debug.Log($"Personagem {selectedCharacter.characterName} foi selecionado!");
+    }
+
+    private void AddCharacterToCollection(Character character)
+    {
+        if (character == null)
+        {
+            Debug.LogError("Personagem nulo não pode ser adicionado.");
+            return;
+        }
+
+        if (character.prefab == null)
+        {
+            Debug.LogError($"Prefab do personagem {character.characterName} não foi atribuído.");
+            return;
+        }
+
+        if (characterCollection.activeTeam.Contains(character))
+        {
+            if (characterCollection.inventory.ContainsKey(character))
+            {
+                characterCollection.inventory[character]++;
+            }
+            else
+            {
+                characterCollection.inventory.Add(character, 1);
+            }
+            Debug.Log($"Personagem {character.characterName} já está na equipe ativa. Adicionado ao inventário. Quantidade: {characterCollection.inventory[character]}");
+            return;
+        }
+
+        if (characterCollection.activeTeam.Count < 3)
+        {
+            if (!characterCollection.characterInstances.ContainsKey(character))
+            {
+                GameObject characterInstance = Instantiate(character.prefab);
+                if (characterInstance == null)
+                {
+                    Debug.LogError($"Falha ao instanciar o prefab do personagem {character.characterName}.");
+                    return;
+                }
+
+                characterInstance.SetActive(false);
+                characterCollection.characterInstances.Add(character, characterInstance);
+            }
+
+            characterCollection.activeTeam.Add(character);
+            Debug.Log($"Personagem {character.characterName} adicionado ao time ativo.");
+        }
+        else
+        {
+            if (characterCollection.inventory.ContainsKey(character))
+            {
+                characterCollection.inventory[character]++;
+            }
+            else
+            {
+                characterCollection.inventory.Add(character, 1);
+            }
+            Debug.Log($"Personagem {character.characterName} adicionado ao inventário. Quantidade: {characterCollection.inventory[character]}");
+        }
+
+        FindObjectOfType<CharacterSwitcher>().UpdateTeamUI();
+    }
+}
