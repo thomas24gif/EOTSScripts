@@ -1,0 +1,347 @@
+// CORE EOTS script - Switch Characters - HP for Switched Characters not working. Requires MainCharacter to work.
+
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.SceneManagement;
+using System.Collections.Generic;
+
+public class CharacterSwitcher : MonoBehaviour
+{
+    [Header("Referências")]
+    public List<Image> characterImages;
+    public Image[] characterIcons;
+    public CharacterCollection characterCollection;
+    
+
+    [Header("Configurações")]
+    [SerializeField] private bool debugMode = true;
+
+    private List<GameObject> characterInstances = new List<GameObject>();
+    private int currentCharacterIndex = 0;
+    private GameObject mainCharacterInstance;
+    public static Transform ActiveCharacter { get; private set; }
+
+    void Awake()
+    {
+   
+        if (FindObjectsOfType<CharacterSwitcher>().Length > 1)
+        {
+            Destroy(gameObject);
+            return;
+        }
+    }
+
+    void Start()
+    {
+        InitializeMainCharacter();
+        InitializeTeamCharacters();
+        UpdateCharacterUI();
+        UpdateTeamUI();
+    }
+
+    void InitializeMainCharacter()
+    {
+        
+        mainCharacterInstance = GameObject.Find(characterCollection.mainCharacter.characterName);
+
+       
+        if (mainCharacterInstance == null)
+        {
+            mainCharacterInstance = Instantiate(
+                characterCollection.mainCharacter.prefab,
+                Vector3.zero,
+                Quaternion.identity
+            );
+            mainCharacterInstance.name = characterCollection.mainCharacter.characterName;
+            
+            if (debugMode) Debug.Log($"[CRIAÇÃO] Novo MainPlayer: {mainCharacterInstance.name}");
+        }
+        else
+        {
+            if (debugMode) Debug.Log($"[REUSO] MainPlayer existente: {mainCharacterInstance.name}");
+        }
+
+        
+        if (!characterCollection.characterInstances.ContainsKey(characterCollection.mainCharacter))
+        {
+            characterCollection.characterInstances.Add(characterCollection.mainCharacter, mainCharacterInstance);
+        }
+
+        characterInstances.Add(mainCharacterInstance);
+    }
+
+    void InitializeTeamCharacters()
+    {
+        
+        CleanDuplicateCharacters();
+
+        foreach (var character in characterCollection.activeTeam)
+        {
+            if (character == characterCollection.mainCharacter) continue;
+
+            
+            if (characterCollection.characterInstances.TryGetValue(character, out GameObject instance))
+            {
+                
+                instance.name = character.characterName;
+                instance.SetActive(false);
+                characterInstances.Add(instance);
+                
+                if (debugMode) Debug.Log($"[REUSO] Personagem existente: {instance.name}");
+            }
+            else
+            {
+                
+                GameObject newInstance = Instantiate(
+                    character.prefab,
+                    Vector3.zero,
+                    Quaternion.identity
+                );
+                newInstance.name = character.characterName;
+                characterCollection.characterInstances.Add(character, newInstance);
+                newInstance.SetActive(false);
+                characterInstances.Add(newInstance);
+                
+                if (debugMode) Debug.Log($"[CRIAÇÃO] Novo personagem: {newInstance.name}");
+            }
+        }
+
+        
+        ActivateOnlyMainCharacter();
+    }
+
+    void CleanDuplicateCharacters()
+    {
+        
+        foreach (var character in characterCollection.activeTeam)
+        {
+            GameObject[] duplicates = GameObject.FindObjectsOfType<GameObject>();
+            foreach (GameObject obj in duplicates)
+            {
+                
+                if (obj.name.StartsWith(character.characterName + "(Clone)") && 
+                    obj != mainCharacterInstance && 
+                    obj != this.gameObject)
+                {
+                    Destroy(obj);
+                    if (debugMode) Debug.Log($"[LIMPEZA] Clone destruído: {obj.name}");
+                }
+            }
+        }
+    }
+
+    void ActivateOnlyMainCharacter()
+    {
+        foreach (GameObject instance in characterInstances)
+        {
+            if (instance != null) instance.SetActive(false);
+        }
+
+        if (mainCharacterInstance != null)
+        {
+            mainCharacterInstance.SetActive(true);
+            ActiveCharacter = mainCharacterInstance.transform;
+            currentCharacterIndex = 0;
+            SetupHealthBar(ActiveCharacter);
+            
+            if (debugMode) Debug.Log($"[ATIVO] Personagem inicial: {mainCharacterInstance.name}");
+        }
+    }
+
+   
+    public void CheckAllCharactersDead()
+    {
+        bool allDead = true;
+        
+        foreach (GameObject character in characterInstances)
+        {
+            PlayerHealth health = character.GetComponent<PlayerHealth>();
+            if (health != null && health.currentHealth > 0)
+            {
+                allDead = false;
+                break;
+            }
+        }
+
+        if (allDead)
+        {
+            if (debugMode) Debug.Log("[GAME OVER] Todos os personagens morreram!");
+            RestartGame();
+        }
+    }
+
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.Alpha1)) SwitchToMainCharacter();
+        if (Input.GetKeyDown(KeyCode.Alpha2)) SwitchCharacter(1);
+        if (Input.GetKeyDown(KeyCode.Alpha3)) SwitchCharacter(2);
+    }
+
+    void SwitchToMainCharacter()
+    {
+        if (currentCharacterIndex == 0) 
+        {
+            if (debugMode) Debug.Log("[IGNORADO] MainPlayer já está ativo");
+            return;
+        }
+        SwitchCharacter(0);
+    }
+
+    void SwitchCharacter(int characterIndex)
+    {
+        if (characterIndex < 0 || characterIndex >= characterInstances.Count)
+        {
+            if (debugMode) Debug.LogWarning($"[ERRO] Índice inválido: {characterIndex}");
+            return;
+        }
+
+        if (characterIndex == currentCharacterIndex)
+        {
+            if (debugMode) Debug.Log($"[IGNORADO] Tentativa de trocar para o mesmo personagem");
+            return;
+        }
+
+        if (!CanSwitchToCharacter(characterInstances[characterIndex]))
+        {
+            return;
+        }
+
+        PerformCharacterSwitch(characterIndex);
+    }
+
+    bool CanSwitchToCharacter(GameObject targetCharacter)
+    {
+        if (targetCharacter == null)
+        {
+            if (debugMode) Debug.LogWarning("[ERRO] Personagem alvo é nulo!");
+            return false;
+        }
+
+        PlayerHealth health = targetCharacter.GetComponent<PlayerHealth>();
+        if (health != null && health.currentHealth <= 0)
+        {
+            if (debugMode) Debug.Log($"[BLOQUEADO] {targetCharacter.name} está morto");
+            return false;
+        }
+
+        return true;
+    }
+
+    void PerformCharacterSwitch(int newIndex)
+    {
+        Vector3 currentPosition = ActiveCharacter.position;
+        Quaternion currentRotation = ActiveCharacter.rotation;
+
+        if (currentCharacterIndex >= 0 && currentCharacterIndex < characterInstances.Count)
+        {
+            GameObject currentChar = characterInstances[currentCharacterIndex];
+            if (currentChar != null)
+            {
+                currentChar.SetActive(false);
+                if (debugMode) Debug.Log($"[DESATIVADO] {currentChar.name}");
+            }
+        }
+
+        currentCharacterIndex = newIndex;
+        GameObject newActiveChar = characterInstances[currentCharacterIndex];
+        newActiveChar.transform.position = currentPosition;
+        newActiveChar.transform.rotation = currentRotation;
+        newActiveChar.SetActive(true);
+
+        ActiveCharacter = newActiveChar.transform;
+        SetupHealthBar(ActiveCharacter);
+        UpdateCharacterUI();
+
+        if (debugMode) Debug.Log($"[ATIVADO] Novo personagem: {newActiveChar.name}");
+    }
+
+    void SetupHealthBar(Transform character)
+    {
+        PlayerHealth health = character.GetComponent<PlayerHealth>();
+        if (health != null && health.healthBar != null)
+        {
+            health.healthBar.gameObject.SetActive(true);
+            health.SyncHealthBar();
+        }
+    }
+
+    public void OnCharacterDeath()
+    {
+        characterImages[currentCharacterIndex].color = new Color(0.5f, 0.5f, 0.5f, 1f);
+
+        for (int i = 1; i < characterInstances.Count; i++)
+        {
+            int nextIndex = (currentCharacterIndex + i) % characterInstances.Count;
+            PlayerHealth health = characterInstances[nextIndex].GetComponent<PlayerHealth>();
+
+            if (characterInstances[nextIndex] != null && health != null && health.currentHealth > 0)
+            {
+                SwitchCharacter(nextIndex);
+                return;
+            }
+        }
+
+        CheckAllCharactersDead(); 
+    }
+
+    void UpdateCharacterUI()
+    {
+        for (int i = 0; i < characterImages.Count; i++)
+        {
+            characterImages[i].color = (i == currentCharacterIndex) 
+                ? Color.white 
+                : new Color(1, 1, 1, 0.5f);
+        }
+    }
+
+    public void UpdateTeamUI()
+    {
+        for (int i = 0; i < characterIcons.Length; i++)
+        {
+            if (i < characterCollection.activeTeam.Count)
+            {
+                characterIcons[i].sprite = characterCollection.activeTeam[i].characterBattleIcon;
+                characterIcons[i].color = Color.white;
+                characterIcons[i].gameObject.SetActive(true);  
+            }
+            else
+            {
+                characterIcons[i].sprite = null;
+                characterIcons[i].gameObject.SetActive(false); 
+            }
+        }
+
+        characterInstances.Clear();
+        if (characterCollection.characterInstances.ContainsKey(characterCollection.mainCharacter))
+        {
+            characterInstances.Add(characterCollection.characterInstances[characterCollection.mainCharacter]);
+        }
+
+        foreach (var character in characterCollection.activeTeam)
+        {
+            if (character != characterCollection.mainCharacter && 
+                characterCollection.characterInstances.ContainsKey(character))
+            {
+                characterInstances.Add(characterCollection.characterInstances[character]);
+            }
+        }
+
+        for (int i = 0; i < characterInstances.Count; i++)
+        {
+            if (characterInstances[i] != null)
+            {
+                characterInstances[i].SetActive(i == currentCharacterIndex);
+            }
+        }
+
+        if (characterInstances.Count > 0 && characterInstances[currentCharacterIndex] != null)
+        {
+            ActiveCharacter = characterInstances[currentCharacterIndex].transform;
+        }
+    }
+
+    void RestartGame()
+    {
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+}
