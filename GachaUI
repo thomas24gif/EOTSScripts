@@ -1,0 +1,81 @@
+using UnityEngine;
+using UnityEngine.UI;
+
+public class GachaUI : MonoBehaviour
+{
+    public GachaSystemNEW gachaSystem;
+    public Image resultImage;
+    public Text resultText;
+    public Button pull1Button;
+    public Button pull5Button;
+    public Button pull10Button;
+    public Button selectCharacter1Button;
+    public Button selectCharacter2Button;
+
+    private void Start()
+    {
+        if (pull1Button != null) pull1Button.onClick.AddListener(() => PullMultipleTimes(1));
+        if (pull5Button != null) pull5Button.onClick.AddListener(() => PullMultipleTimes(5));
+        if (pull10Button != null) pull10Button.onClick.AddListener(() => PullMultipleTimes(10));
+
+        if (selectCharacter1Button != null) selectCharacter1Button.onClick.AddListener(OnSelectCharacter1Clicked);
+        if (selectCharacter2Button != null) selectCharacter2Button.onClick.AddListener(OnSelectCharacter2Clicked);
+    }
+
+    private void PullMultipleTimes(int times)
+    {
+        if (gachaSystem == null)
+        {
+            Debug.LogError("GachaSystem não está atribuído.");
+            return;
+        }
+
+        if (resultText != null) resultText.text = "";
+
+        for (int i = 0; i < times; i++)
+        {
+            object result = gachaSystem.PullGacha();
+            if (result is Character character)
+            {
+                if (resultText != null) resultText.text += $"Você conseguiu: {character.characterName} (Tier {character.tier})\n";
+                if (resultImage != null) resultImage.sprite = character.characterSprite;
+            }
+            else if (result is Item item)
+            {
+                if (resultText != null) resultText.text += $"Você conseguiu o item: {item.itemName}\n";
+                if (resultImage != null) resultImage.sprite = item.itemSprite;
+            }
+            else
+            {
+                if (resultText != null) resultText.text += "Você não conseguiu nada desta vez.\n";
+                if (resultImage != null) resultImage.sprite = null;
+            }
+        }
+
+        if (resultText != null) resultText.text += $"Pity atual: {gachaSystem.pityCounter}\n";
+    }
+
+    private void OnSelectCharacter1Clicked()
+    {
+        if (gachaSystem == null || gachaSystem.tierSCharacters == null || gachaSystem.tierSCharacters.Count == 0)
+        {
+            if (resultText != null) resultText.text = "Nenhum personagem Tier S disponível.";
+            return;
+        }
+
+        gachaSystem.SelectTierSCharacter(gachaSystem.tierSCharacters[0]);
+        if (resultText != null) resultText.text = $"Personagem selecionado: {gachaSystem.tierSCharacters[0].characterName}";
+    }
+
+    private void OnSelectCharacter2Clicked()
+    {
+        if (gachaSystem == null || gachaSystem.tierSCharacters == null || gachaSystem.tierSCharacters.Count < 2)
+        {
+            if (resultText != null) resultText.text = "Segundo personagem Tier S não disponível.";
+            return;
+        }
+
+        gachaSystem.SelectTierSCharacter(gachaSystem.tierSCharacters[1]);
+        if (resultText != null) resultText.text = $"Personagem selecionado: {gachaSystem.tierSCharacters[1].characterName}";
+    }
+}
